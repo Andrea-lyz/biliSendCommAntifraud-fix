@@ -23,6 +23,8 @@ android {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Android SDK default debug keystore (androiddebugkey). CI and local Release share this.
+            signingConfig signingConfigs.debug
         }
     }
     compileOptions {
@@ -51,4 +53,11 @@ dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'com.github.wanggaowan:PhotoPreview:2.5.5'
     implementation 'de.hdodenhof:circleimageview:3.1.0'
+}
+
+tasks.register("printVersion") {
+    doLast {
+        println "VERSION_NAME=${android.defaultConfig.versionName}"
+        println "VERSION_CODE=${android.defaultConfig.versionCode}"
+    }
 }
