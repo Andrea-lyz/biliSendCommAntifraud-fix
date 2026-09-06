@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: biliSendCommAntifraud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: biliSendCommAntifraud/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Test and assemble Release
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Read version
+        id: meta
+        run: |
+          set -euo pipefail
+          MAP=$(./gradlew --no-daemon -q :app:printVersion)
+          NAME=$(printf '%s\n' "$MAP" | sed -n 's/^VERSION_NAME=//p' | tail -n 1)
+          CODE=$(printf '%s\n' "$MAP" | sed -n 's/^VERSION_CODE=//p' | tail -n 1)
+          if [ -z "$NAME" ] || [ -z "$CODE" ]; then
+            echo "Failed to read version from Gradle:" >&2
+            printf '%s\n' "$MAP" >&2
+            exit 1
+          fi
+          echo "version_name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "asset_name=biliSendCommAntifraud-${NAME}-${CODE}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          SRC="app/build/outputs/apk/release/app-release.apk"
+          test -f "$SRC"
+          DEST="${{ github.workspace }}/${{ steps.meta.outputs.asset_name }}"
+          cp "$SRC" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          sha256sum "$DEST" | tee "$DEST.sha256"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.meta.outputs.version_name) }}
+          name: ${{ steps.meta.outputs.version_name }} (${{ steps.meta.outputs.version_code }})
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.artifact.outputs.path }}
+            ${{ steps.artifact.outputs.path }}.sha256
+          body: |
+            正式构建（R8 minify）使用 Android 默认 debug 签名（`androiddebugkey`），不是原作者发布密钥。
+
+            - versionName: `${{ steps.meta.outputs.version_name }}`
+            - versionCode: `${{ steps.meta.outputs.version_code }}`
+            - 可覆盖本仓库 CI / 本地默认签名包
+            - 不能覆盖 Play 或原作者正式签名包
